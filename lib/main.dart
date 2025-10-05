@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:animations/animations.dart';
@@ -6,6 +7,9 @@ import 'package:animated_background/animated_background.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:dio/dio.dart';
 import 'splash_screen.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:pie_chart/pie_chart.dart';
+import 'package:universal_html/html.dart' as html;
 
 void main() {
   runApp(const MyApp());
@@ -89,7 +93,6 @@ class ExoplanetHomePage extends StatefulWidget {
 
 class _ExoplanetHomePageState extends State<ExoplanetHomePage>
     with TickerProviderStateMixin {
-  final _formKey = GlobalKey<FormState>();
   // Keys to identify and scroll to different sections of the page.
   final _identifierSectionKey = GlobalKey();
   final _analysisSectionKey = GlobalKey();
@@ -98,7 +101,10 @@ class _ExoplanetHomePageState extends State<ExoplanetHomePage>
 
   // State management variables
   PageState _pageState = PageState.input;
-  String _predictionResult = '';
+  String _fileName = '';
+  Map<String, double> _dataMap = {};
+  List<int>? _downloadableFileBytes;
+  String _downloadFileName = 'predictions.csv';
   String _predictionCertainty = '';
   // Controllers to get the text from TextFormFields
   final _orbitalPeriodController = TextEditingController();
@@ -107,47 +113,75 @@ class _ExoplanetHomePageState extends State<ExoplanetHomePage>
   final _stellarRadiusController = TextEditingController();
 
   Future<void> _getExoplanetPrediction() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() {
-        _pageState = PageState.loading;
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['csv'],
+    );
+
+    if (result == null) return;
+
+    setState(() {
+      _pageState = PageState.loading;
+      _fileName = result.files.single.name;
+    });
+
+    const apiUrl = "https://nasa-space-apps-backend-production.up.railway.app";
+    final dio = Dio();
+
+    try {
+      final file = result.files.single;
+
+      final formData = FormData.fromMap({
+        'file': MultipartFile.fromBytes(file.bytes!, filename: file.name),
       });
-      // const apiUrl = String.fromEnvironment('API_URL');
-      const apiUrl =
-          "https://nasa-space-apps-backend-production.up.railway.app/predict";
-      final dio = Dio();
 
-      try {
-        final response = await dio.post(
-          apiUrl,
-          data: {
-            'koi_period': double.parse(_orbitalPeriodController.text),
-            'koi_duration': double.parse(_transitDurationController.text),
-            'koi_prad': double.parse(_planetaryRadiusController.text),
-            'koi_srad': double.parse(_stellarRadiusController.text),
-          },
-        );
+      final response = await dio.post(
+        '$apiUrl/predict',
+        data: formData,
+        options: Options(headers: {'Content-Type': 'multipart/form-data'}),
+      );
+      // Assuming the API returns a JSON with stats and file data
+      final responseData = response.data;
+      final stats = responseData['stats'] as Map<String, dynamic>;
+      _dataMap = stats.map(
+        (key, value) => MapEntry(key, (value as num).toDouble()),
+      );
 
-        // With dio, a successful response (2xx) is handled here.
-        // dio automatically decodes the JSON response.
-        final result = response.data;
-        _predictionResult = result['prediction'] ?? 'N/A';
-        _predictionCertainty = '';
-      } on DioException catch (e) {
-        // Non-2xx status codes and other connection errors are caught here.
-        if (e.response != null) {
-          _predictionResult = 'ERROR';
-          _predictionCertainty = 'Status: ${e.response?.statusCode}';
+      // Assuming the file content is returned as a base64 encoded string
+      final fileContentBase64 = responseData['file_content'] as String;
+      _downloadableFileBytes = base64Decode(fileContentBase64);
+      _downloadFileName = responseData['filename'] ?? 'predictions.csv';
+
+      _predictionCertainty = '';
+    } on DioException catch (e) {
+      print("Error: ${e.message}");
+      if (e.response != null) {
+        if (e.response?.statusCode == 502) {
+          _predictionCertainty =
+              'The uploaded CSV file is not in the correct format. Please check the file and try again.';
         } else {
-          _predictionResult = 'ERROR';
-          _predictionCertainty = 'Connection Failed';
+          _predictionCertainty =
+              'An error occurred. Status: ${e.response?.statusCode}';
         }
-        print(e);
+      } else {
+        _predictionCertainty = 'Connection Failed';
       }
-
+      print(e);
+    } finally {
       setState(() {
         _pageState = PageState.result;
       });
     }
+  }
+
+  void _downloadFile() {
+    if (_downloadableFileBytes == null) return;
+    final blob = html.Blob([_downloadableFileBytes]);
+    final url = html.Url.createObjectUrlFromBlob(blob);
+    final anchor = html.AnchorElement(href: url)
+      ..setAttribute("download", _downloadFileName)
+      ..click();
+    html.Url.revokeObjectUrl(url);
   }
 
   @override
@@ -354,19 +388,14 @@ class _ExoplanetHomePageState extends State<ExoplanetHomePage>
         return const _LoadingView();
       case PageState.result:
         return _ResultView(
-          prediction: _predictionResult,
+          fileName: _fileName,
+          dataMap: _dataMap,
           certainty: _predictionCertainty,
           onReset: () => setState(() => _pageState = PageState.input),
+          onDownload: _downloadFile,
         );
       case PageState.input:
-        return _InputView(
-          formKey: _formKey,
-          orbitalPeriodController: _orbitalPeriodController,
-          transitDurationController: _transitDurationController,
-          planetaryRadiusController: _planetaryRadiusController,
-          stellarRadiusController: _stellarRadiusController,
-          onAnalyze: _getExoplanetPrediction,
-        );
+        return _InputView(onAnalyze: _getExoplanetPrediction);
     }
   }
 
@@ -432,7 +461,7 @@ class _ModelAnalysisView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 64.0),
       child: Card(
         color: Colors.black.withOpacity(0.2),
         elevation: 0,
@@ -440,29 +469,118 @@ class _ModelAnalysisView extends StatelessWidget {
           side: BorderSide(color: Colors.grey.shade800, width: 0.5),
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Column(
-            children: [
-              Text(
-                'Current Model Analysis',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(color: Colors.white),
-              ),
-              const SizedBox(height: 16),
-              const Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _StatColumn(title: 'Accuracy', value: '98.2%'),
-                  _StatColumn(title: 'Dataset', value: 'Kepler (Q1-Q17)'),
-                  _StatColumn(title: 'Model', value: 'Random Forest'),
-                ],
-              ),
-            ],
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1200),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Current Model Analysis',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.headlineMedium?.copyWith(color: Colors.white),
+                ),
+                const SizedBox(height: 24),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    if (constraints.maxWidth > 600) {
+                      // Wide screen: show stats in a row
+                      return const Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          _StatColumn(title: 'Accuracy', value: '78%'),
+                          _StatColumn(
+                            title: 'Dataset',
+                            value: 'Kepler Objects of Interest (KOI)',
+                          ),
+                          _StatColumn(
+                            title: 'Model',
+                            value: 'CatBoost Classifier',
+                          ),
+                        ],
+                      );
+                    } else {
+                      // Narrow screen: show stats in a column
+                      return const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _StatColumn(title: 'Accuracy', value: '78%'),
+                          SizedBox(height: 16),
+                          _StatColumn(
+                            title: 'Dataset',
+                            value: 'Kepler Objects of Interest (KOI)',
+                          ),
+                          SizedBox(height: 16),
+                          _StatColumn(
+                            title: 'Model',
+                            value: 'CatBoost Classifier',
+                          ),
+                        ],
+                      );
+                    }
+                  },
+                ),
+                const SizedBox(height: 40),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    if (constraints.maxWidth > 800) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: _buildImageCard(
+                              'Feature Importance',
+                              'assets/images/feature_importance.png',
+                            ),
+                          ),
+                          const SizedBox(width: 24),
+                          Expanded(
+                            child: _buildImageCard(
+                              'Confusion Matrix',
+                              'assets/images/confusion_matrix.png',
+                            ),
+                          ),
+                        ],
+                      );
+                    }
+                    return Column(
+                      children: [
+                        _buildImageCard(
+                          'Feature Importance',
+                          'assets/images/feature_importance.png',
+                        ),
+                        const SizedBox(height: 24),
+                        _buildImageCard(
+                          'Confusion Matrix',
+                          'assets/images/confusion_matrix.png',
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildImageCard(String title, String imagePath) {
+    return Column(
+      children: [
+        Text(
+          title,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 16),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.asset(imagePath, height: 350, fit: BoxFit.contain),
+        ),
+      ],
     );
   }
 }
@@ -470,6 +588,7 @@ class _ModelAnalysisView extends StatelessWidget {
 class _StatColumn extends StatelessWidget {
   const _StatColumn({required this.title, required this.value});
   final String title;
+
   final String value;
 
   @override
@@ -731,20 +850,8 @@ class _ContactSectionView extends StatelessWidget {
 
 // The view for user input
 class _InputView extends StatelessWidget {
-  const _InputView({
-    required this.formKey,
-    required this.orbitalPeriodController,
-    required this.transitDurationController,
-    required this.planetaryRadiusController,
-    required this.stellarRadiusController,
-    required this.onAnalyze,
-  });
+  const _InputView({required this.onAnalyze});
 
-  final GlobalKey<FormState> formKey;
-  final TextEditingController orbitalPeriodController;
-  final TextEditingController transitDurationController;
-  final TextEditingController planetaryRadiusController;
-  final TextEditingController stellarRadiusController;
   final VoidCallback onAnalyze;
 
   @override
@@ -756,84 +863,38 @@ class _InputView extends StatelessWidget {
         constraints: const BoxConstraints(maxWidth: 500),
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(32.0),
-          child: Form(
-            key: formKey,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                const Icon(
-                  Icons.travel_explore,
-                  size: 60,
-                  color: Colors.redAccent,
-                ),
-                const SizedBox(height: 16),
-                Text('Exoplanet Classifier', style: textTheme.headlineMedium),
-                Text(
-                  'Enter transit data to classify a celestial object',
-                  style: textTheme.titleMedium?.copyWith(color: Colors.white70),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 40),
-                _buildTextFormField(
-                  controller: orbitalPeriodController,
-                  labelText: 'Orbital Period (days)',
-                ),
-                const SizedBox(height: 16),
-                _buildTextFormField(
-                  controller: transitDurationController,
-                  labelText: 'Transit Duration (hours)',
-                ),
-                const SizedBox(height: 16),
-                _buildTextFormField(
-                  controller: planetaryRadiusController,
-                  labelText: 'Planetary Radius (Earth radii)',
-                ),
-                const SizedBox(height: 16),
-                _buildTextFormField(
-                  controller: stellarRadiusController,
-                  labelText: 'Stellar Radius (Solar radii)',
-                ),
-                const SizedBox(height: 40),
-                ElevatedButton.icon(
-                  onPressed: onAnalyze,
-                  icon: const Icon(Icons.rocket_launch_outlined),
-                  label: const Text('Analyze'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 40,
-                      vertical: 16,
-                    ),
-                    textStyle: textTheme.titleMedium,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: <Widget>[
+              const Icon(
+                Icons.travel_explore,
+                size: 60,
+                color: Colors.redAccent,
+              ),
+              const SizedBox(height: 16),
+              Text('Exoplanet Classifier', style: textTheme.headlineMedium),
+              Text(
+                'Upload a CSV file with transit data to classify celestial objects',
+                style: textTheme.titleMedium?.copyWith(color: Colors.white70),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 40),
+              ElevatedButton.icon(
+                onPressed: onAnalyze,
+                icon: const Icon(Icons.upload_file),
+                label: const Text('Upload CSV and Analyze'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 40,
+                    vertical: 16,
                   ),
+                  textStyle: textTheme.titleMedium,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
-    );
-  }
-
-  TextFormField _buildTextFormField({
-    required TextEditingController controller,
-    required String labelText,
-  }) {
-    return TextFormField(
-      controller: controller,
-      decoration: InputDecoration(
-        labelText: labelText,
-        border: const OutlineInputBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
-        ),
-      ),
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      validator: (value) =>
-          (value == null ||
-              value.isEmpty ||
-              double.tryParse(value) == null ||
-              double.parse(value) <= 0)
-          ? 'Please enter a valid number'
-          : null,
     );
   }
 }
@@ -861,19 +922,25 @@ class _LoadingView extends StatelessWidget {
 // The view for displaying the prediction result
 class _ResultView extends StatelessWidget {
   const _ResultView({
-    required this.prediction,
+    required this.fileName,
+    required this.dataMap,
     required this.certainty,
     required this.onReset,
+    required this.onDownload,
   });
 
-  final String prediction;
+  final String fileName;
+  final Map<String, double> dataMap;
   final String certainty;
   final VoidCallback onReset;
+  final VoidCallback onDownload;
+
+  bool get _isError => dataMap.isEmpty;
 
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    final (icon, color) = _getResultVisuals(prediction);
+    final (icon, color) = _getResultVisuals('');
 
     return Card(
       elevation: 10,
@@ -883,28 +950,74 @@ class _ResultView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('Analysis Complete', style: textTheme.titleLarge),
-            const SizedBox(height: 24),
-            Icon(icon, size: 80, color: color),
-            const SizedBox(height: 16),
-            Text(
-              prediction,
-              style: textTheme.displaySmall?.copyWith(
-                color: color,
-                fontWeight: FontWeight.bold,
+            if (_isError) ...[
+              Text('Analysis Failed', style: textTheme.titleLarge),
+              const SizedBox(height: 24),
+              Icon(icon, size: 80, color: color),
+              const SizedBox(height: 16),
+              Text(
+                'ERROR',
+                style: textTheme.displaySmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            if (certainty.isNotEmpty)
-              Text('Certainty: $certainty', style: textTheme.titleMedium)
-            else
-              const SizedBox(height: 0),
-            const SizedBox(height: 32),
-            TextButton.icon(
-              onPressed: onReset,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Analyze Another'),
-            ),
+              const SizedBox(height: 8),
+              if (certainty.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Text(
+                    certainty,
+                    style: textTheme.titleMedium,
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              const SizedBox(height: 32),
+              TextButton.icon(
+                onPressed: onReset,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try Again'),
+              ),
+            ] else ...[
+              Text('Analysis Complete', style: textTheme.titleLarge),
+              const SizedBox(height: 16),
+              Text('File: $fileName', style: textTheme.titleSmall),
+              const SizedBox(height: 24),
+              PieChart(
+                dataMap: dataMap,
+                animationDuration: const Duration(milliseconds: 800),
+                chartLegendSpacing: 32,
+                chartRadius: MediaQuery.of(context).size.width / 3.2,
+                initialAngleInDegree: 0,
+                chartType: ChartType.ring,
+                ringStrokeWidth: 32,
+                legendOptions: const LegendOptions(
+                  showLegendsInRow: false,
+                  legendPosition: LegendPosition.right,
+                  showLegends: true,
+                  legendTextStyle: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                chartValuesOptions: const ChartValuesOptions(
+                  showChartValueBackground: true,
+                  showChartValues: true,
+                  showChartValuesInPercentage: false,
+                  showChartValuesOutside: false,
+                  decimalPlaces: 0,
+                ),
+              ),
+              const SizedBox(height: 32),
+              ElevatedButton.icon(
+                onPressed: onDownload,
+                icon: const Icon(Icons.download),
+                label: const Text('Download Predictions'),
+              ),
+              const SizedBox(height: 16),
+              TextButton.icon(
+                onPressed: onReset,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Analyze Another'),
+              ),
+            ],
           ],
         ),
       ),
@@ -913,15 +1026,12 @@ class _ResultView extends StatelessWidget {
 
   // Helper to get an icon and color based on the prediction string
   (IconData, Color) _getResultVisuals(String prediction) {
-    switch (prediction) {
-      case 'CONFIRMED':
-        return (Icons.check_circle_outline, Colors.greenAccent.shade400);
-      case 'CANDIDATE':
-        return (Icons.help_outline, Colors.amber.shade400);
-      case 'FALSE POSITIVE':
-        return (Icons.highlight_off, Colors.redAccent.shade400);
-      default:
-        return (Icons.error_outline, Colors.grey);
+    if (_isError) {
+      return (Icons.error_outline, Colors.redAccent.shade400);
+    } else {
+      // You can customize this for the success state if you want
+      // For now, let's use a generic success icon.
+      return (Icons.pie_chart, Colors.greenAccent.shade400);
     }
   }
 }
