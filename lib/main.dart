@@ -506,52 +506,84 @@ class _TeamSectionView extends StatelessWidget {
             style: Theme.of(context).textTheme.headlineMedium,
           ),
           const SizedBox(height: 40),
-          // Use a Wrap widget for responsiveness. It will arrange children
-          // in a row and wrap to the next line if space is tight.
-          const Wrap(
-            spacing: 24.0,
-            runSpacing: 24.0,
-            alignment: WrapAlignment.center,
-            children: [
-              _TeamMemberCard(
-                name: 'Hana Ramah',
-                role: 'AI leader',
-                githubUrl: 'https://github.com/HanaRamah',
-                linkedinUrl: 'https://www.linkedin.com/in/hana-ramah',
-              ),
-              _TeamMemberCard(
-                name: 'Seif Shaheen',
-                role: 'AI member / Frontend',
-                githubUrl: 'https://github.com/SeifShaheen',
-                linkedinUrl: 'https://www.linkedin.com/in/seif-shaheen/',
-              ),
-              _TeamMemberCard(
-                name: 'Jana Ghoneim',
-                role: 'AI member / Backend',
-                githubUrl: 'https://github.com/JanaGh7',
-                linkedinUrl: 'https://linkedin.com/in/jana-ghoneim',
-              ),
-              _TeamMemberCard(
-                name: 'Mostafa Mokhtar',
-                role: 'AI member',
-                githubUrl: 'https://github.com/MostafaMokhtar8545',
-                linkedinUrl: 'http://linkedin.com/in/m-mokhtar',
-              ),
-              _TeamMemberCard(
-                name: 'Esraa Khaled',
-                role: 'AI member',
-                githubUrl: 'https://github.com/esraakh299',
-                linkedinUrl:
-                    'https://www.linkedin.com/in/esraa-khaled-706b70202/',
-              ),
-              _TeamMemberCard(
-                name: 'Mohamed Alaa',
-                role: 'AI member',
-                githubUrl: 'https://github.com/MohamedAlaa2005',
-                linkedinUrl:
-                    'https://www.linkedin.com/in/mohamed-alaa-62206229b',
-              ),
-            ],
+          // Responsive grid for team members
+          LayoutBuilder(
+            builder: (context, constraints) {
+              int columns;
+              double width = constraints.maxWidth;
+              if (width > 900) {
+                columns = 3;
+              } else if (width > 600) {
+                columns = 2;
+              } else {
+                columns = 1;
+              }
+              final members = const [
+                _TeamMemberCard(
+                  name: 'Hana Ramah',
+                  role: 'AI leader',
+                  githubUrl: 'https://github.com/HanaRamah',
+                  linkedinUrl: 'https://www.linkedin.com/in/hana-ramah',
+                ),
+                _TeamMemberCard(
+                  name: 'Seif Shaheen',
+                  role: 'AI member / Frontend',
+                  githubUrl: 'https://github.com/SeifShaheen',
+                  linkedinUrl: 'https://www.linkedin.com/in/seif-shaheen/',
+                ),
+                _TeamMemberCard(
+                  name: 'Jana Ghoneim',
+                  role: 'AI member / Backend',
+                  githubUrl: 'https://github.com/JanaGh7',
+                  linkedinUrl: 'https://linkedin.com/in/jana-ghoneim',
+                ),
+                _TeamMemberCard(
+                  name: 'Mostafa Mokhtar',
+                  role: 'AI member',
+                  githubUrl: 'https://github.com/MostafaMokhtar8545',
+                  linkedinUrl: 'http://linkedin.com/in/m-mokhtar',
+                ),
+                _TeamMemberCard(
+                  name: 'Esraa Khaled',
+                  role: 'AI member',
+                  githubUrl: 'https://github.com/esraakh299',
+                  linkedinUrl:
+                      'https://www.linkedin.com/in/esraa-khaled-706b70202/',
+                ),
+                _TeamMemberCard(
+                  name: 'Mohamed Alaa',
+                  role: 'AI member',
+                  githubUrl: 'https://github.com/MohamedAlaa2005',
+                  linkedinUrl:
+                      'https://www.linkedin.com/in/mohamed-alaa-62206229b',
+                ),
+              ];
+
+              // Split members into rows
+              List<Widget> rows = [];
+              for (int i = 0; i < members.length; i += columns) {
+                rows.add(
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: members
+                        .sublist(
+                          i,
+                          (i + columns) > members.length
+                              ? members.length
+                              : (i + columns),
+                        )
+                        .map(
+                          (e) => Padding(
+                            padding: const EdgeInsets.all(12.0),
+                            child: e,
+                          ),
+                        )
+                        .toList(),
+                  ),
+                );
+              }
+              return Column(children: rows);
+            },
           ),
         ],
       ),
