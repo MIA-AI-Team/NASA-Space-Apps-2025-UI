@@ -1,6 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
-
+import 'package:flutter/foundation.dart' show kIsWeb, Uint8List;
 import 'package:animations/animations.dart';
 import 'package:flutter/material.dart';
 import 'package:animated_background/animated_background.dart';
@@ -113,30 +114,63 @@ class _ExoplanetHomePageState extends State<ExoplanetHomePage>
   final _stellarRadiusController = TextEditingController();
 
   Future<void> _getExoplanetPrediction() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['csv'],
-    );
+    Uint8List? fileBytes;
+    String? fileName;
 
-    if (result == null) return;
+    if (kIsWeb) {
+      // 👇 هنا بنعمل picker يدوي للويب
+      final html.FileUploadInputElement uploadInput =
+          html.FileUploadInputElement();
+      uploadInput.accept = '.csv';
+      uploadInput.click();
+
+      final completer = Completer<html.File>();
+      uploadInput.onChange.listen((event) {
+        final file = uploadInput.files?.first;
+        if (file != null) {
+          completer.complete(file);
+        }
+      });
+
+      final selectedFile = await completer.future;
+      fileName = selectedFile.name;
+
+      final reader = html.FileReader();
+      final readerCompleter = Completer<Uint8List>();
+      reader.readAsArrayBuffer(selectedFile);
+      reader.onLoadEnd.listen((event) {
+        readerCompleter.complete(reader.result as Uint8List);
+      });
+      fileBytes = await readerCompleter.future;
+    } else {
+      // 👇 هنا الـ FilePicker العادي لأي منصة تانية
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv'],
+      );
+
+      if (result == null) return;
+
+      fileBytes = result.files.single.bytes;
+      fileName = result.files.single.name;
+    }
+
+    if (fileBytes == null) return;
 
     setState(() {
       _pageState = PageState.loading;
-      _fileName = result.files.single.name;
+      _fileName = fileName!;
     });
 
     const apiUrl = "https://nasa-space-apps-backend-production.up.railway.app";
     final dio = Dio(BaseOptions(baseUrl: apiUrl));
 
     try {
-      final file = result.files.single;
-
       final formData = FormData.fromMap({
-        'file': MultipartFile.fromBytes(file.bytes!, filename: file.name),
+        'file': MultipartFile.fromBytes(fileBytes, filename: fileName),
       });
 
       final response = await dio.post('/predict', data: formData);
-      // Assuming the API returns a JSON with stats and file data
       final responseData = response.data as Map<String, dynamic>?;
 
       if (responseData != null &&
@@ -147,7 +181,6 @@ class _ExoplanetHomePageState extends State<ExoplanetHomePage>
           (key, value) => MapEntry(key, (value as num).toDouble()),
         );
 
-        // Assuming the file content is returned as a base64 encoded string
         final fileContentBase64 = responseData['file_content'] as String;
         _downloadableFileBytes = base64Decode(fileContentBase64);
         _downloadFileName =
@@ -163,11 +196,10 @@ class _ExoplanetHomePageState extends State<ExoplanetHomePage>
 
         final fileContent = responseData['file'] as String;
         _downloadableFileBytes = utf8.encode(fileContent);
-        _downloadFileName = 'predictions_$_fileName';
+        _downloadFileName = 'predictions_$fileName';
 
         _predictionCertainty = '';
       } else {
-        // The response was successful, but didn't contain the expected data.
         _dataMap.clear();
         _predictionCertainty =
             'Received an invalid or incomplete response from the server.';
@@ -509,7 +541,7 @@ class _ModelAnalysisView extends StatelessWidget {
                       return const Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          _StatColumn(title: 'Accuracy', value: '98.2%'),
+                          _StatColumn(title: 'Accuracy', value: '78%'),
                           _StatColumn(
                             title: 'Dataset',
                             value: 'Kepler Objects of Interest (KOI)',
@@ -525,7 +557,7 @@ class _ModelAnalysisView extends StatelessWidget {
                       return const Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          _StatColumn(title: 'Accuracy', value: '98.2%'),
+                          _StatColumn(title: 'Accuracy', value: '78%'),
                           SizedBox(height: 16),
                           _StatColumn(
                             title: 'Dataset',
