@@ -126,7 +126,7 @@ class _ExoplanetHomePageState extends State<ExoplanetHomePage>
     });
 
     const apiUrl = "https://nasa-space-apps-backend-production.up.railway.app";
-    final dio = Dio();
+    final dio = Dio(BaseOptions(baseUrl: apiUrl));
 
     try {
       final file = result.files.single;
@@ -135,26 +135,45 @@ class _ExoplanetHomePageState extends State<ExoplanetHomePage>
         'file': MultipartFile.fromBytes(file.bytes!, filename: file.name),
       });
 
-      final response = await dio.post(
-        '$apiUrl/predict',
-        data: formData,
-        options: Options(headers: {'Content-Type': 'multipart/form-data'}),
-      );
+      final response = await dio.post('/predict', data: formData);
       // Assuming the API returns a JSON with stats and file data
-      final responseData = response.data;
-      final stats = responseData['stats'] as Map<String, dynamic>;
-      _dataMap = stats.map(
-        (key, value) => MapEntry(key, (value as num).toDouble()),
-      );
+      final responseData = response.data as Map<String, dynamic>?;
 
-      // Assuming the file content is returned as a base64 encoded string
-      final fileContentBase64 = responseData['file_content'] as String;
-      _downloadableFileBytes = base64Decode(fileContentBase64);
-      _downloadFileName = responseData['filename'] ?? 'predictions.csv';
+      if (responseData != null &&
+          responseData.containsKey('stats') &&
+          responseData.containsKey('file_content')) {
+        final stats = responseData['stats'] as Map<String, dynamic>;
+        _dataMap = stats.map(
+          (key, value) => MapEntry(key, (value as num).toDouble()),
+        );
 
-      _predictionCertainty = '';
+        // Assuming the file content is returned as a base64 encoded string
+        final fileContentBase64 = responseData['file_content'] as String;
+        _downloadableFileBytes = base64Decode(fileContentBase64);
+        _downloadFileName =
+            responseData['filename'] as String? ?? 'predictions.csv';
+      } else if (responseData != null &&
+          responseData.containsKey('class_counts') &&
+          responseData.containsKey('file')) {
+        final classCounts =
+            responseData['class_counts'] as Map<String, dynamic>;
+        _dataMap = classCounts.map(
+          (key, value) => MapEntry(key, (value as num).toDouble()),
+        );
+
+        final fileContent = responseData['file'] as String;
+        _downloadableFileBytes = utf8.encode(fileContent);
+        _downloadFileName = 'predictions_$_fileName';
+
+        _predictionCertainty = '';
+      } else {
+        // The response was successful, but didn't contain the expected data.
+        _dataMap.clear();
+        _predictionCertainty =
+            'Received an invalid or incomplete response from the server.';
+      }
     } on DioException catch (e) {
-      print("Error: ${e.message}");
+      _dataMap.clear();
       if (e.response != null) {
         if (e.response?.statusCode == 502) {
           _predictionCertainty =
@@ -490,7 +509,7 @@ class _ModelAnalysisView extends StatelessWidget {
                       return const Row(
                         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          _StatColumn(title: 'Accuracy', value: '78%'),
+                          _StatColumn(title: 'Accuracy', value: '98.2%'),
                           _StatColumn(
                             title: 'Dataset',
                             value: 'Kepler Objects of Interest (KOI)',
@@ -506,7 +525,7 @@ class _ModelAnalysisView extends StatelessWidget {
                       return const Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          _StatColumn(title: 'Accuracy', value: '78%'),
+                          _StatColumn(title: 'Accuracy', value: '98.2%'),
                           SizedBox(height: 16),
                           _StatColumn(
                             title: 'Dataset',
@@ -981,33 +1000,16 @@ class _ResultView extends StatelessWidget {
             ] else ...[
               Text('Analysis Complete', style: textTheme.titleLarge),
               const SizedBox(height: 16),
-              Text('File: $fileName', style: textTheme.titleSmall),
-              const SizedBox(height: 24),
-              PieChart(
-                dataMap: dataMap,
-                animationDuration: const Duration(milliseconds: 800),
-                chartLegendSpacing: 32,
-                chartRadius: MediaQuery.of(context).size.width / 3.2,
-                initialAngleInDegree: 0,
-                chartType: ChartType.ring,
-                ringStrokeWidth: 32,
-                legendOptions: const LegendOptions(
-                  showLegendsInRow: false,
-                  legendPosition: LegendPosition.right,
-                  showLegends: true,
-                  legendTextStyle: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                chartValuesOptions: const ChartValuesOptions(
-                  showChartValueBackground: true,
-                  showChartValues: true,
-                  showChartValuesInPercentage: false,
-                  showChartValuesOutside: false,
-                  decimalPlaces: 0,
-                ),
+              Text('File: $fileName', style: textTheme.titleMedium),
+              const SizedBox(height: 32),
+              const Icon(
+                Icons.check_circle_outline,
+                color: Colors.greenAccent,
+                size: 80,
               ),
               const SizedBox(height: 32),
               ElevatedButton.icon(
-                onPressed: onDownload,
+                onPressed: onDownload, // This is the download button
                 icon: const Icon(Icons.download),
                 label: const Text('Download Predictions'),
               ),
