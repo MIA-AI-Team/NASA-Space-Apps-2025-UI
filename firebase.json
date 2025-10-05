@@ -1,0 +1,17 @@
+{
+  "hosting": {
+    "site":"mia-nasa-space-apps-2025-2b456",
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
