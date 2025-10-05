@@ -276,7 +276,7 @@ class _ExoplanetHomePageState extends State<ExoplanetHomePage>
                     minOpacity: 0.1,
                     maxOpacity: 0.4,
                     particleCount: 70,
-                    spawnMaxRadius: 1.5,
+                    spawnMaxRadius: 5,
                     spawnMinRadius: 1.0,
                     spawnMaxSpeed: 15.0,
                     spawnMinSpeed: 15.0,
@@ -796,7 +796,10 @@ class _InputView extends StatelessWidget {
       ),
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       validator: (value) =>
-          (value == null || value.isEmpty || double.tryParse(value) == null)
+          (value == null ||
+              value.isEmpty ||
+              double.tryParse(value) == null ||
+              double.parse(value) <= 0)
           ? 'Please enter a valid number'
           : null,
     );
